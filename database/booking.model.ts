@@ -1,53 +1,59 @@
-// database/booking.model.ts
-import { Schema, model, Document, Types } from "mongoose";
+import {
+    Schema,
+    model,
+    models,
+    type HydratedDocument,
+    type InferSchemaType,
+    type Model,
+    type Types,
+} from "mongoose";
 import { Event } from "./event.model";
 
-/**
- * Strongly typed Booking interface.
- */
-export interface IBooking extends Document {
-    eventId: Types.ObjectId;
-    email: string;
-    createdAt: Date;
-    updatedAt: Date;
-}
+// Basic RFC5322-lite email check; pragmatic and safe for server-side validation
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 
-/**
- * Simple email validation regex (reasonable production tradeoff).
- */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const bookingSchema = new Schema<IBooking>(
+const BookingSchema = new Schema(
     {
-        eventId: { type: Schema.Types.ObjectId, ref: "Event", required: true, index: true },
-        email: { type: String, required: true, trim: true },
+        eventId: {
+            type: Schema.Types.ObjectId,
+            ref: "Event",
+            required: true,
+            index: true, // speed up lookups and aggregations by event
+        },
+        email: {
+            type: String,
+            required: true,
+            lowercase: true,
+            trim: true,
+            validate: {
+                validator: (v: string) => EMAIL_REGEX.test(v),
+                message: "Invalid email format",
+            },
+        },
     },
     {
-        timestamps: true,
+        timestamps: true, // adds createdAt/updatedAt
+        versionKey: false,
         strict: true,
     }
 );
 
-/**
- * Pre-save hook:
- * - Ensure email is valid.
- * - Verify referenced Event exists; throw if not.
- */
-bookingSchema.pre<IBooking>("save", async function () {
-    // Validate email format
-    if (typeof this.email !== "string" || !EMAIL_RE.test(this.email)) {
-        throw new Error("Invalid email format");
-    }
+// Verify that the referenced event exists before saving
+BookingSchema.pre("save", async function (this: HydratedDocument<BookingType>, next) {
+    try {
+        const id: Types.ObjectId = this.eventId;
 
-    // Verify referenced event exists
-    if (!Types.ObjectId.isValid(this.eventId)) {
-        throw new Error("Invalid eventId");
-    }
+        const exists = await Event.exists({ _id: id });
+        if (!exists) throw new Error("Referenced event does not exist");
 
-    const exists = await Event.exists({ _id: this.eventId });
-    if (!exists) {
-        throw new Error("Referenced event does not exist");
+        next();
+    } catch (err) {
+        next(err);
     }
 });
 
-export const Booking = model<IBooking>("Booking", bookingSchema);
+export type BookingType = InferSchemaType<typeof BookingSchema>;
+export type BookingDocument = HydratedDocument<BookingType>;
+
+export const Booking: Model<BookingType> =
+    (models.Booking as Model<BookingType>) || model<BookingType>("Booking", BookingSchema);
