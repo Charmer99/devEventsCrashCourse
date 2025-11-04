@@ -1,152 +1,146 @@
-// database/event.model.ts
-import { Schema, model, Document } from "mongoose";
+import {
+    Schema,
+    model,
+    models,
+    type HydratedDocument,
+    type InferSchemaType,
+    type Model,
+} from "mongoose";
 
-/**
- * Strongly typed Event interface for Mongoose documents.
- */
-export interface IEvent extends Document {
-    title: string;
-    slug: string;
-    description: string;
-    overview: string;
-    image: string;
-    venue: string;
-    location: string;
-    date: string; // normalized ISO date (YYYY-MM-DD)
-    time: string; // normalized time (HH:MM, 24-hour)
-    mode: string;
-    audience: string;
-    agenda: string[];
-    organizer: string;
-    tags: string[];
-    createdAt: Date;
-    updatedAt: Date;
+// Generate a URL-safe slug from a title (lowercase, ASCII, hyphen-separated)
+function toSlug(input: string): string {
+    return input
+        .trim()
+        .toLowerCase()
+        .normalize("NFKD") // decompose accents
+        .replace(/[\u0300-\u036f]/g, "") // strip diacritics
+        .replace(/[^a-z0-9]+/g, "-") // non-alphanumerics -> '-'
+        .replace(/-{2,}/g, "-") // collapse dashes
+        .replace(/^-+|-+$/g, ""); // trim leading/trailing dashes
 }
 
-/**
- * Helper: create a URL-friendly slug from a title.
- */
-const makeSlug = (input: string): string =>
-    input
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, "-") // non-alphanum -> dash
-        .replace(/^-+|-+$/g, "") // trim edge dashes
-        .replace(/-{2,}/g, "-"); // collapse multiple dashes
-
-/**
- * Helper: Normalize date to ISO date string YYYY-MM-DD.
- * Throws if invalid.
- */
-const normalizeDate = (dateStr: string): string => {
-    const d = new Date(dateStr);
-    if (Number.isNaN(d.getTime())) throw new Error("Invalid date format");
-    // Return YYYY-MM-DD
-    return d.toISOString().slice(0, 10);
-};
-
-/**
- * Helper: Normalize time to HH:MM (24-hour).
- * Accepts formats like "9:00 AM", "09:00", "9 AM", "21:30".
- * Throws if cannot parse.
- */
-const normalizeTime = (timeStr: string): string => {
-    const s = timeStr.trim();
-    // Try direct HH:MM 24-hour
-    const hhmm24 = /^([01]?\d|2[0-3]):([0-5]\d)$/;
-    if (hhmm24.test(s)) {
-        const [, h, m] = s.match(hhmm24)!;
-        return `${h.padStart(2, "0")}:${m}`;
+// Normalize a date string to ISO calendar date (YYYY-MM-DD)
+function normalizeISODateStr(input: string): string {
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) {
+        throw new Error("Invalid date: must be parseable to a valid calendar date");
     }
+    const y = d.getUTCFullYear();
+    const m = (d.getUTCMonth() + 1).toString().padStart(2, "0");
+    const day = d.getUTCDate().toString().padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
 
-    // Match 12-hour like "9:30 AM" or "9 AM"
-    const hhmm12 = /^([1-9]|1[0-2])(?::([0-5]\d))?\s*(am|pm)$/i;
-    const m12 = s.match(hhmm12);
-    if (m12) {
-        let hour = parseInt(m12[1], 10);
-        const minutes = m12[2] ?? "00";
-        const period = m12[3]!.toLowerCase();
-        if (period === "pm" && hour !== 12) hour += 12;
-        if (period === "am" && hour === 12) hour = 0;
-        return `${String(hour).padStart(2, "0")}:${minutes}`;
+// Normalize time to 24h HH:mm (accepts 'H:mm', 'HH:mm', 'h:mm am/pm', 'h am/pm', 'HH:mm:ss')
+function normalizeTime24h(input: string): string {
+    const s = input.trim().toLowerCase();
+    const match = s.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm)?$/i);
+    if (!match) throw new Error("Invalid time: expected formats like 'HH:mm' or 'h:mm am/pm'");
+
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2] ? parseInt(match[2], 10) : 0;
+    const meridiem = match[3]?.toLowerCase();
+
+    if (meridiem) {
+        if (hours < 1 || hours > 12) throw new Error("Invalid hour in 12h time");
+        if (meridiem === "pm" && hours !== 12) hours += 12;
+        if (meridiem === "am" && hours === 12) hours = 0;
+    } else if (hours < 0 || hours > 23) {
+        throw new Error("Invalid hour in 24h time");
     }
+    if (minutes < 0 || minutes > 59) throw new Error("Invalid minutes in time");
 
-    // Try parsing with Date fallback (some browser/node formats)
-    const parsed = new Date(`1970-01-01T${s}`);
-    if (!Number.isNaN(parsed.getTime())) {
-        const hh = String(parsed.getHours()).padStart(2, "0");
-        const mm = String(parsed.getMinutes()).padStart(2, "0");
-        return `${hh}:${mm}`;
-    }
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+}
 
-    throw new Error("Invalid time format");
-};
-
-const eventSchema = new Schema<IEvent>(
+const EventSchema = new Schema(
     {
         title: { type: String, required: true, trim: true },
-        slug: { type: String, required: true, unique: true, index: true },
+        slug: { type: String, index: true, unique: true }, // generated in pre-save
         description: { type: String, required: true, trim: true },
         overview: { type: String, required: true, trim: true },
         image: { type: String, required: true, trim: true },
         venue: { type: String, required: true, trim: true },
         location: { type: String, required: true, trim: true },
-        date: { type: String, required: true }, // stored as ISO date string (YYYY-MM-DD)
-        time: { type: String, required: true }, // stored as HH:MM (24-hour)
+        date: { type: String, required: true, trim: true }, // normalized to YYYY-MM-DD
+        time: { type: String, required: true, trim: true }, // normalized to HH:mm (24h)
         mode: { type: String, required: true, trim: true },
         audience: { type: String, required: true, trim: true },
-        agenda: { type: [String], required: true, validate: [(v: string[]) => v.length > 0, "Agenda cannot be empty"] },
+        agenda: {
+            type: [String],
+            required: true,
+            set: (arr: string[]) => arr.map((s) => s.trim()),
+            validate: {
+                validator: (arr: unknown) =>
+                    Array.isArray(arr) && arr.length > 0 && arr.every((v) => typeof v === "string" && v.trim().length > 0),
+                message: "agenda must be a non-empty array of non-empty strings",
+            },
+        },
         organizer: { type: String, required: true, trim: true },
-        tags: { type: [String], required: true, validate: [(v: string[]) => v.length > 0, "Tags cannot be empty"] },
+        tags: {
+            type: [String],
+            required: true,
+            set: (arr: string[]) => arr.map((s) => s.trim().toLowerCase()),
+            validate: {
+                validator: (arr: unknown) =>
+                    Array.isArray(arr) && arr.length > 0 && arr.every((v) => typeof v === "string" && v.trim().length > 0),
+                message: "tags must be a non-empty array of non-empty strings",
+            },
+        },
     },
     {
-        timestamps: true, // createdAt & updatedAt
+        timestamps: true, // adds createdAt/updatedAt (Date)
+        versionKey: false,
         strict: true,
     }
 );
 
-/**
- * Pre-save hook:
- * - Generate slug from title only when title changed.
- * - Normalize date to YYYY-MM-DD and time to HH:MM.
- * - Validate required fields are present and non-empty.
- */
-eventSchema.pre<IEvent>("save", async function () {
-    // Validate non-empty required strings
-    const requiredStrings: (keyof IEvent)[] = [
-        "title",
-        "description",
-        "overview",
-        "image",
-        "venue",
-        "location",
-        "date",
-        "time",
-        "mode",
-        "audience",
-        "organizer",
-    ];
-    for (const key of requiredStrings) {
-        const value = (this as any)[key];
-        if (typeof value !== "string" || value.trim().length === 0) {
-            throw new Error(`${String(key)} is required and cannot be empty`);
+// Ensure uniqueness at the storage level
+EventSchema.index({ slug: 1 }, { unique: true });
+
+// Generate slug and normalize date/time before saving
+EventSchema.pre("save", function (this: HydratedDocument<EventType>, next) {
+    try {
+        if (this.isModified("title") || !this.slug) {
+            this.slug = toSlug(this.title);
+            if (!this.slug) throw new Error("Unable to generate slug from title");
         }
-    }
 
-    // Normalize date
-    this.date = normalizeDate(this.date);
+        if (this.isModified("date")) {
+            this.date = normalizeISODateStr(this.date);
+        }
 
-    // Normalize time
-    this.time = normalizeTime(this.time);
+        if (this.isModified("time")) {
+            this.time = normalizeTime24h(this.time);
+        }
 
-    // Generate slug only if title modified (or slug empty)
-    // isModified is available on documents
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore - Mongoose adds isModified on Document
-    const titleModified = this.isModified ? this.isModified("title") : false;
-    if (titleModified || !this.slug) {
-        this.slug = makeSlug(this.title);
+        // Guard: enforce presence of required trimmed strings (in addition to schema-level required)
+        const requiredStrings: Array<keyof Pick<EventType, "title" | "description" | "overview" | "image" | "venue" | "location" | "mode" | "audience" | "organizer">> = [
+            "title",
+            "description",
+            "overview",
+            "image",
+            "venue",
+            "location",
+            "mode",
+            "audience",
+            "organizer",
+        ];
+        for (const key of requiredStrings) {
+            const val = (this as any)[key] as string; // local-only narrowed access
+            if (typeof val !== "string" || val.trim().length === 0) {
+                throw new Error(`${String(key)} is required`);
+            }
+        }
+
+        next();
+    } catch (err) {
+        next(err as Error);
     }
 });
 
-export const Event = model<IEvent>("Event", eventSchema);
+export type EventType = InferSchemaType<typeof EventSchema>;
+export type EventDocument = HydratedDocument<EventType>;
+
+export const Event: Model<EventType> =
+    (models.Event as Model<EventType>) || model<EventType>("Event", EventSchema);
