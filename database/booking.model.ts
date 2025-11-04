@@ -41,15 +41,14 @@ const BookingSchema = new Schema(
 // Verify that the referenced event exists before saving
 BookingSchema.pre("save", async function (this: HydratedDocument<BookingType>, next) {
     try {
-        const id: Types.ObjectId | undefined = this.eventId as unknown as Types.ObjectId;
-        if (!id) throw new Error("eventId is required");
+        const id: Types.ObjectId = this.eventId;
 
         const exists = await Event.exists({ _id: id });
         if (!exists) throw new Error("Referenced event does not exist");
 
         next();
     } catch (err) {
-        next(err as Error);
+        next(err);
     }
 });
 
