@@ -144,3 +144,6 @@ export type EventDocument = HydratedDocument<EventType>;
 
 export const Event: Model<EventType> =
     (models.Event as Model<EventType>) || model<EventType>("Event", EventSchema);
+
+export class IEvent {
+}

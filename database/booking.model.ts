@@ -47,7 +47,7 @@ BookingSchema.pre("save", async function (this: HydratedDocument<BookingType>, n
         if (!exists) throw new Error("Referenced event does not exist");
 
         next();
-    } catch (err) {
+    } catch (err : any) {
         next(err);
     }
 });
