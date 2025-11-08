@@ -6,8 +6,6 @@ import { IEvent } from "@/database/event.model";
 import { getSimilarEventsBySlug } from "@/lib/actions/events.actions";
 import { cacheLife } from "next/cache";
 
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL as string;
-
 const EventDetailsItem = ({ icon, alt, label }: { icon: string; alt: string; label: string }) => (
   <div className="flex-row-gap-2 items-center">
     <Image src={icon} alt={alt} width={17} height={17} />
@@ -36,11 +34,12 @@ const EventTags = ({ tags }: { tags: string[] }) => (
   </div>
 );
 
-async function EventDetails({ slug }: { slug: string }) {
+async function EventDetails({ params }: { params: Promise<{ slug: string }> }) {
   'use cache';
   cacheLife('hours');
 
-  const request = await fetch(`${BASE_URL}/api/events/${slug}`);
+  const { slug } = await params;
+  const request = await fetch(`/api/events/${slug}`);
   const data = await request.json();
   const event = data.event;
 
