@@ -5,6 +5,7 @@ import BookEvent from "@/components/BookEvent";
 import {IEvent} from "@/database/event.model";
 import {getSimilarEventsBySlug} from "@/lib/actions/events.actions";
 import EventCard from "@/components/EventCard";
+import {cacheLife} from "next/cache";
 
 const EventDetailsItem = ({icon, alt, label}: {icon: string;alt: string; label:string}) => (
     <div className="flex-row-gap-2 items-center">
@@ -32,10 +33,16 @@ const EventTags = ({tags} : {tags: string[]}) => (
     </div>
 )
 const EventDetailsPage = async ({params}: { params: Promise<{ slug: string }> }) => {
+    'use cache'
+    cacheLife('hours')
 
     const { slug } = await params;
     const request = await fetch(`${BASE_URL}/api/events/${slug}`);
-    const {event: {description, image, overview, date, time, location, mode, agenda, audience, tags, organizer}} = await request.json();
+    // const {event: {description, image, overview, date, time, location, mode, agenda, audience, tags, organizer}} = await request.json();
+
+    const data = await request.json();
+    const event = data.event;
+    const { description, image, overview, date, time, location, mode, agenda, audience, tags, organizer } = event;
 
     if(!description) return notFound();
     const bookings = 10;
@@ -93,7 +100,7 @@ const EventDetailsPage = async ({params}: { params: Promise<{ slug: string }> })
                 {/*//Right Side - Booking Form*/}
 
                 <aside className="booking">
-                    <p className="signup-card">
+                    <div className="signup-card">
                         <h2>Book your spot</h2>
                         {bookings > 0 ? (
                             <p className="text-sm">
@@ -104,9 +111,10 @@ const EventDetailsPage = async ({params}: { params: Promise<{ slug: string }> })
                             <p className="text-sm"> Be the first to book your spot </p>
                             )}
 
-                        <BookEvent/>
 
-                    </p>
+                        <BookEvent eventId={event._id} slug={event.slug}/>
+
+                    </div>
                 </aside>
             </div>
 
