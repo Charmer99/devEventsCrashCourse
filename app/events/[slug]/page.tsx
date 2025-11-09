@@ -1,18 +1,15 @@
-// app/events/[slug]/page.tsx
-import { Suspense } from "react";
+import {Suspense} from "react";
 import EventDetails from "@/components/EventDetails";
 
-const EventDetailsPage = async ({ params }: { params: { slug: string } }) => {
-
-    const { slug } = await params; // ✅ Unwrap the Promise
+const EventDetailsPage = async ({ params }: { params: Promise<{ slug: string }>}) => {
+    const slug = params.then((p) => p.slug);
 
     return (
         <main>
             <Suspense fallback={<div>Loading...</div>}>
-                <EventDetails slug={slug} />
+                <EventDetails params={slug} />
             </Suspense>
         </main>
-    );
-};
-
-export default EventDetailsPage;
+    )
+}
+export default EventDetailsPage
