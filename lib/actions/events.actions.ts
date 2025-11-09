@@ -4,6 +4,7 @@ import {Event} from '@/database/event.model'
 
 
 import connectDB from "@/lib/mongodb";
+import { Event } from "@/lib/models/event.model";
 
 export const getSimilarEventsBySlug = async (slug: string) => {
     try{
@@ -17,3 +18,8 @@ export const getSimilarEventsBySlug = async (slug: string) => {
         return [];
     }
 }
+export const getAllEvents = async () => {
+    await connectDB();
+    const events = await Event.find().lean();
+    return events;
+};
